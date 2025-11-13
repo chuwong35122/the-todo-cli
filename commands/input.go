@@ -35,12 +35,6 @@ func Prepare(db *gorm.DB) *cobra.Command {
 					return
 				}
 
-				for _, todo := range *todos {
-					fmt.Println(todo.Title)
-					fmt.Println(todo.Tag.Tag)
-					fmt.Println(todo.CreatedAt)
-				}
-
 				m := NewModel(todos, db)
 				p := tea.NewProgram(m)
 

@@ -164,17 +164,17 @@ func NewModel(todos *[]models.Todo, db *gorm.DB) Model {
 		items[i] = item{
 			Checkbox: checkbox,
 			Tag:      tag,
-			Title:    t.Title,
+			Title:    t.GetDisplayTitle(i == 0), // DB order DESC
 		}
 	}
 
 	l := list.New(items, itemDelegate{}, 0, listHeight)
 	l.Title = "Your Todos"
+	l.Styles.PaginationStyle = paginationStyle
+	l.Styles.HelpStyle = helpStyle
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
-	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
 
 	return Model{list: l, todos: todos, db: db}
 }
