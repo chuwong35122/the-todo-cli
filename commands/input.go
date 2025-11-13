@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"todo/libs"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -19,38 +20,53 @@ func Prepare(db *gorm.DB) *cobra.Command {
 		Use:   "todo",
 		Short: "The Todo CLI app",
 		Run: func(cmd *cobra.Command, args []string) {
+			if createDesc != "" {
+				err := create(db, createDesc, tag)
+				if err != nil {
+					libs.Logger.Fatal().
+						Err(err).
+						Msg("Error creating todo")
+
+				}
+
+				todos := read(db)
+				if todos == nil {
+					libs.Logger.Info().Msg("Todo List doesn't exist. Create one!")
+					return
+				}
+
+				for _, todo := range *todos {
+					fmt.Println(todo.Title)
+					fmt.Println(todo.Tag.Tag)
+					fmt.Println(todo.CreatedAt)
+				}
+
+				m := NewModel(todos, db)
+				p := tea.NewProgram(m)
+
+				if _, err := p.Run(); err != nil {
+					libs.Logger.Fatal().
+						Err(err).
+						Msg("Error running program")
+
+					os.Exit(1)
+				}
+			}
+
 			if len(args) == 0 {
 				todos := read(db)
 				if todos == nil {
 					return
 				}
 
-				m := NewModel(todos)
+				m := NewModel(todos, db)
 				p := tea.NewProgram(m)
 
 				if _, err := p.Run(); err != nil {
-					fmt.Println("Error running program:", err)
-					os.Exit(1)
-				}
-			}
+					libs.Logger.Fatal().
+						Err(err).
+						Msg("Error running program")
 
-			if createDesc != "" {
-				fmt.Printf("Creating todo: %s with tag: %s\n", createDesc, tag)
-				err := create(db, createDesc, tag)
-				if err != nil {
-					fmt.Println("Error creating todo:", err)
-				}
-
-				todos := read(db)
-				if todos == nil {
-					return
-				}
-
-				m := NewModel(todos)
-				p := tea.NewProgram(m)
-
-				if _, err := p.Run(); err != nil {
-					fmt.Println("Error running program:", err)
 					os.Exit(1)
 				}
 			}

@@ -12,6 +12,7 @@ type Todo struct {
 	CompletedAt *time.Time `gorm:"default:null"`
 	TagID       *uint      `gorm:"index"`
 	Tag         *TodoTag   `gorm:"foreignKey:TagID;references:ID"`
+	LastCreated bool
 }
 
 func (i Todo) FilterValue() string { return i.Title }

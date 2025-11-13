@@ -3,24 +3,32 @@ package commands
 import (
 	"fmt"
 	"io"
+	"time"
 	"todo/models"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"gorm.io/gorm"
 )
 
 const listHeight = 14
 
 var (
-	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
-	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170"))
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(2)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(0).Foreground(lipgloss.Color("170"))
 	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
 	helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
 	quitTextStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
+	tagWidth          = 12
+	todoWidth         = 40
 )
 
-type item string
+type item struct {
+	Checkbox string
+	Tag      string
+	Title    string
+}
 
 func (i item) FilterValue() string { return "" }
 
@@ -29,13 +37,17 @@ type itemDelegate struct{}
 func (d itemDelegate) Height() int                               { return 1 }
 func (d itemDelegate) Spacing() int                              { return 0 }
 func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
+
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	i, ok := listItem.(item)
 	if !ok {
 		return
 	}
 
-	str := fmt.Sprintf("%d. %s", index+1, i)
+	tagCol := fmt.Sprintf("%-*s", tagWidth, i.Tag)
+	todoCol := fmt.Sprintf("%-*s", todoWidth, i.Title)
+
+	str := fmt.Sprintf("%s %s %s", i.Checkbox, tagCol, todoCol)
 
 	fn := itemStyle.Render
 	if index == m.Index() {
@@ -51,6 +63,7 @@ type Model struct {
 	list     list.Model
 	quitting bool
 	todos    *[]models.Todo
+	db       *gorm.DB
 }
 
 func (m Model) Init() tea.Cmd {
@@ -59,23 +72,67 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
 		return m, nil
 
 	case tea.KeyMsg:
-		switch keypress := msg.String(); keypress {
+		switch msg.String() {
+
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
 
-		case "enter":
-			i, ok := m.list.SelectedItem().(item)
-			if ok {
-				fmt.Printf("%s\n", i)
+		case " ":
+			selectedIndex := m.list.Index()
+			if selectedIndex < 0 || selectedIndex >= len(*m.todos) {
+				// nothing selected; let list handle it
+				break
 			}
+
+			todo := &(*m.todos)[selectedIndex]
+
+			if todo.CompletedAt == nil {
+				now := time.Now()
+				todo.CompletedAt = &now
+			} else {
+				todo.CompletedAt = nil
+			}
+
+			cb := "[ ]"
+			if todo.CompletedAt != nil {
+				cb = "[X]"
+			}
+
+			tag := todo.GetTag()
+			if tag == "" {
+				tag = "—"
+			}
+
+			m.list.SetItem(selectedIndex, item{
+				Checkbox: cb,
+				Tag:      tag,
+				Title:    todo.Title,
+			})
+
+			return m, nil
+
+		case "enter":
+			idx := m.list.Index()
+			if idx < 0 || idx >= len(*m.todos) {
+				break
+			}
+
+			todo := &(*m.todos)[idx]
+			if m.db != nil {
+				_ = m.db.Save(todo).Error
+			}
+
 			return m, tea.Quit
 		}
+
+		// IMPORTANT: don't return here for unhandled keys to be handled by list.Update
 	}
 
 	var cmd tea.Cmd
@@ -90,10 +147,25 @@ func (m Model) View() string {
 	return "\n" + m.list.View()
 }
 
-func NewModel(todos *[]models.Todo) Model {
+func NewModel(todos *[]models.Todo, db *gorm.DB) Model {
 	items := make([]list.Item, len(*todos))
+
 	for i, t := range *todos {
-		items[i] = item(t.GetTitle())
+		checkbox := "[ ]"
+		if t.CompletedAt != nil {
+			checkbox = "[X]"
+		}
+
+		tag := "—"
+		if t.Tag != nil {
+			tag = t.Tag.Tag
+		}
+
+		items[i] = item{
+			Checkbox: checkbox,
+			Tag:      tag,
+			Title:    t.Title,
+		}
 	}
 
 	l := list.New(items, itemDelegate{}, 0, listHeight)
@@ -104,5 +176,5 @@ func NewModel(todos *[]models.Todo) Model {
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
 
-	return Model{list: l, todos: todos}
+	return Model{list: l, todos: todos, db: db}
 }
