@@ -26,7 +26,7 @@ func createTag(db *gorm.DB, tag string) (*models.TodoTag, error) {
 
 func create(db *gorm.DB, desc, tag string) error {
 	if tag == "" {
-		tag = "me"
+		tag = "-"
 	}
 
 	tagModel, err := createTag(db, tag)

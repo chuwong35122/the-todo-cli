@@ -22,10 +22,10 @@ func (i Todo) GetTitle() string    { return i.Title }
 func (i Todo) GetTag() string      { return i.Tag.Tag }
 func (i Todo) GetDisplayTitle(isNew bool) string {
 	if !isNew {
-		return i.Tag.Tag
+		return i.Title
 	}
 
-	return fmt.Sprintf("%s (new)", i.Tag.Tag)
+	return fmt.Sprintf("%s (new)", i.Title)
 }
 
 type TodoTag struct {

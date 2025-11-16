@@ -25,9 +25,9 @@ var (
 )
 
 type item struct {
-	Checkbox string
-	Tag      string
-	Title    string
+	Checkbox       string
+	Tag            string
+	DisplayedTitle string
 }
 
 func (i item) FilterValue() string { return "" }
@@ -44,10 +44,10 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		return
 	}
 
+	todoCol := fmt.Sprintf("%-*s", todoWidth, i.DisplayedTitle)
 	tagCol := fmt.Sprintf("%-*s", tagWidth, i.Tag)
-	todoCol := fmt.Sprintf("%-*s", todoWidth, i.Title)
 
-	str := fmt.Sprintf("%s %s %s", i.Checkbox, tagCol, todoCol)
+	str := fmt.Sprintf("%s  %s  %s", i.Checkbox, todoCol, tagCol)
 
 	fn := itemStyle.Render
 	if index == m.Index() {
@@ -111,9 +111,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.list.SetItem(selectedIndex, item{
-				Checkbox: cb,
-				Tag:      tag,
-				Title:    todo.Title,
+				Checkbox:       cb,
+				Tag:            tag,
+				DisplayedTitle: todo.Title,
 			})
 
 			return m, nil
@@ -162,9 +162,9 @@ func NewModel(todos *[]models.Todo, db *gorm.DB) Model {
 		}
 
 		items[i] = item{
-			Checkbox: checkbox,
-			Tag:      tag,
-			Title:    t.GetDisplayTitle(i == 0), // DB order DESC
+			Checkbox:       checkbox,
+			Tag:            tag,
+			DisplayedTitle: t.GetDisplayTitle(i == 0), // DB order DESC
 		}
 	}
 
