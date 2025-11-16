@@ -7,18 +7,11 @@ import (
 )
 
 func createTag(db *gorm.DB, tag string) (*models.TodoTag, error) {
-	t := models.TodoTag{}
-	err := db.Where("tag = ?", tag).First(&t).Error
+	t := models.TodoTag{Tag: tag}
 
+	err := db.Save(&t).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			t = models.TodoTag{Tag: tag}
-			if err := db.Create(&t).Error; err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	return &t, nil
