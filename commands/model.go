@@ -80,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 
-		case "q", "ctrl+c":
+		case "q", "ctrl+c", "esc":
 			m.quitting = true
 			return m, tea.Quit
 
@@ -132,7 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// IMPORTANT: don't return here for unhandled keys to be handled by list.Update
+		// unhandled keys fall through to list.Update
 	}
 
 	var cmd tea.Cmd
@@ -169,7 +169,10 @@ func NewModel(todos *[]models.Todo, db *gorm.DB) Model {
 	}
 
 	l := list.New(items, itemDelegate{}, 0, listHeight)
-	l.Title = "Your Todos"
+
+	// Title + short description under it
+	l.Title = "Your Todos\nSpace: check/uncheck · Esc: exit"
+
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
 	l.SetShowStatusBar(false)
