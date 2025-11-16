@@ -51,3 +51,23 @@ func countAll(db *gorm.DB) (int64, error) {
 
 	return count, nil
 }
+
+func countUnfinished(db *gorm.DB) (int64, error) {
+	var count int64
+
+	if err := db.Model(&models.Todo{}).Where("completed_at IS NULL").Count(&count).Error; err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+func countFinished(db *gorm.DB) (int64, error) {
+	var count int64
+
+	if err := db.Model(&models.Todo{}).Where("completed_at IS NOT NULL").Count(&count).Error; err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}

@@ -20,6 +20,14 @@ const (
 	listHeight = 14
 )
 
+type FilterMode int
+
+const (
+	FilterAll FilterMode = iota
+	FilterUnfinished
+	FilterFinished
+)
+
 var (
 	itemStyle         = lipgloss.NewStyle().PaddingLeft(2)
 	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(0).Foreground(lipgloss.Color("170"))
@@ -33,6 +41,9 @@ var (
 	arrowDisabledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	pageActiveStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	pageInactiveStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+
+	tabActiveStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Padding(0, 1)
+	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
 )
 
 type item struct {
@@ -76,6 +87,7 @@ type Model struct {
 	db          *gorm.DB
 	totalPages  int
 	currentPage int
+	filterMode  FilterMode
 }
 
 func NewModel(db *gorm.DB) (Model, error) {
@@ -125,12 +137,39 @@ func NewModel(db *gorm.DB) (Model, error) {
 		db:          db,
 		totalPages:  totalPages,
 		currentPage: 0,
+		filterMode:  FilterAll,
 	}, nil
+}
+
+func (m *Model) getCountByFilter() (int64, error) {
+	switch m.filterMode {
+	case FilterAll:
+		return countAll(m.db)
+	case FilterUnfinished:
+		return countUnfinished(m.db)
+	case FilterFinished:
+		return countFinished(m.db)
+	default:
+		return countAll(m.db)
+	}
+}
+
+func (m *Model) getTodosByFilter(limit, offset int) (*[]models.Todo, error) {
+	switch m.filterMode {
+	case FilterAll:
+		return readAll(m.db, limit, offset)
+	case FilterUnfinished:
+		return read(m.db, limit, offset, false)
+	case FilterFinished:
+		return read(m.db, limit, offset, true)
+	default:
+		return readAll(m.db, limit, offset)
+	}
 }
 
 func (m *Model) refreshTodos() error {
 	offset := m.currentPage * constants.DefaultLimit
-	todos, err := read(m.db, constants.DefaultLimit, offset, false)
+	todos, err := m.getTodosByFilter(constants.DefaultLimit, offset)
 	if err != nil {
 		return err
 	}
@@ -232,6 +271,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.refreshTodos()
 			}
 			return m, nil
+
+		case "1":
+			if m.filterMode != FilterAll {
+				m.filterMode = FilterAll
+				m.currentPage = 0
+				count, _ := m.getCountByFilter()
+				m.totalPages = int(math.Ceil(float64(count) / float64(constants.DefaultLimit)))
+				_ = m.refreshTodos()
+			}
+			return m, nil
+
+		case "2":
+			if m.filterMode != FilterUnfinished {
+				m.filterMode = FilterUnfinished
+				m.currentPage = 0
+				count, _ := m.getCountByFilter()
+				m.totalPages = int(math.Ceil(float64(count) / float64(constants.DefaultLimit)))
+				_ = m.refreshTodos()
+			}
+			return m, nil
+
+		case "3":
+			if m.filterMode != FilterFinished {
+				m.filterMode = FilterFinished
+				m.currentPage = 0
+				count, _ := m.getCountByFilter()
+				m.totalPages = int(math.Ceil(float64(count) / float64(constants.DefaultLimit)))
+				_ = m.refreshTodos()
+			}
+			return m, nil
+
+		case "tab":
+			m.filterMode = (m.filterMode + 1) % 3
+			m.currentPage = 0
+			count, _ := m.getCountByFilter()
+			m.totalPages = int(math.Ceil(float64(count) / float64(constants.DefaultLimit)))
+			_ = m.refreshTodos()
+			return m, nil
 		}
 	}
 
@@ -290,6 +367,28 @@ func max(a, b int) int {
 	return b
 }
 
+func renderTabs(currentMode FilterMode) string {
+	tabs := []struct {
+		name string
+		mode FilterMode
+	}{
+		{"All", FilterAll},
+		{"Unfinished", FilterUnfinished},
+		{"Finished", FilterFinished},
+	}
+
+	var rendered []string
+	for _, tab := range tabs {
+		if tab.mode == currentMode {
+			rendered = append(rendered, tabActiveStyle.Render(tab.name))
+		} else {
+			rendered = append(rendered, tabInactiveStyle.Render(tab.name))
+		}
+	}
+
+	return "  " + strings.Join(rendered, " ")
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return quitTextStyle.Render("Exiting program.")
@@ -316,14 +415,18 @@ func (m Model) View() string {
 		}
 	}
 
+	tabs := renderTabs(m.filterMode)
 	m.list.Title = "✏️ My Todos"
 
-	pagination := fmt.Sprintf(
-		"\n\n  %s  %s  %s",
-		leftArrow,
-		renderPagination(m.currentPage, m.totalPages),
-		rightArrow,
-	)
+	pagination := ""
+	if m.totalPages > 1 {
+		pagination = fmt.Sprintf(
+			"\n\n  %s  %s  %s",
+			leftArrow,
+			renderPagination(m.currentPage, m.totalPages),
+			rightArrow,
+		)
+	}
 
-	return "\n" + m.list.View() + pagination
+	return m.list.View() + "\n" + tabs + pagination
 }
