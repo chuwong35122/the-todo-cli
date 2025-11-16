@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"todo/constants"
 	"todo/libs"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,6 +21,7 @@ func Prepare(db *gorm.DB) *cobra.Command {
 		Use:   "todo",
 		Short: "The Todo CLI app",
 		Run: func(cmd *cobra.Command, args []string) {
+
 			if createDesc != "" {
 				err := create(db, createDesc, tag)
 				if err != nil {
@@ -29,13 +31,25 @@ func Prepare(db *gorm.DB) *cobra.Command {
 
 				}
 
-				todos := read(db)
+				todos, err := readAll(db, constants.DefaultLimit, 0)
+				if err != nil {
+					libs.Logger.Fatal().Msgf("Error occurred: %v", err)
+					return
+				}
+
 				if todos == nil {
 					libs.Logger.Info().Msg("Todo List doesn't exist. Create one!")
 					return
 				}
 
-				m := NewModel(todos, db)
+				m, err := NewModel(db)
+				if err != nil {
+					libs.Logger.Fatal().
+						Err(err).
+						Msgf("Error running program %s", err)
+
+					os.Exit(1)
+				}
 				p := tea.NewProgram(m)
 
 				if _, err := p.Run(); err != nil {
@@ -48,12 +62,17 @@ func Prepare(db *gorm.DB) *cobra.Command {
 			}
 
 			if len(args) == 0 {
-				todos := read(db)
+				todos, err := readAll(db, constants.DefaultLimit, 0)
+				if err != nil {
+					libs.Logger.Fatal().Msgf("Error occurred: %v", err)
+					return
+				}
+
 				if todos == nil {
 					return
 				}
 
-				m := NewModel(todos, db)
+				m, err := NewModel(db)
 				p := tea.NewProgram(m)
 
 				if _, err := p.Run(); err != nil {

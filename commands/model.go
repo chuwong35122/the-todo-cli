@@ -1,10 +1,14 @@
 package commands
 
 import (
-	"fmt"
 	"io"
+	"math"
+	"strings"
 	"time"
+	"todo/constants"
 	"todo/models"
+
+	"fmt"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +16,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const listHeight = 14
+const (
+	listHeight = 14
+)
 
 var (
 	itemStyle         = lipgloss.NewStyle().PaddingLeft(2)
@@ -22,6 +28,11 @@ var (
 	quitTextStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
 	tagWidth          = 12
 	todoWidth         = 40
+
+	arrowEnabledStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+	arrowDisabledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	pageActiveStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	pageInactiveStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 )
 
 type item struct {
@@ -37,7 +48,6 @@ type itemDelegate struct{}
 func (d itemDelegate) Height() int                               { return 1 }
 func (d itemDelegate) Spacing() int                              { return 0 }
 func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
-
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	i, ok := listItem.(item)
 	if !ok {
@@ -52,7 +62,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fn := itemStyle.Render
 	if index == m.Index() {
 		fn = func(s ...string) string {
-			return selectedItemStyle.Render("> " + s[0])
+			return selectedItemStyle.Render("＞ " + s[0])
 		}
 	}
 
@@ -60,10 +70,95 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 }
 
 type Model struct {
-	list     list.Model
-	quitting bool
-	todos    *[]models.Todo
-	db       *gorm.DB
+	list        list.Model
+	quitting    bool
+	todos       []models.Todo
+	db          *gorm.DB
+	totalPages  int
+	currentPage int
+}
+
+func NewModel(db *gorm.DB) (Model, error) {
+	count, err := countAll(db)
+	if err != nil {
+		return Model{}, err
+	}
+
+	totalPages := int(math.Ceil(float64(count) / float64(constants.DefaultLimit)))
+
+	todos, err := read(db, constants.DefaultLimit, 0, false)
+	if err != nil {
+		return Model{}, err
+	}
+
+	items := make([]list.Item, len(*todos))
+	for i, t := range *todos {
+		checkbox := "[ ]"
+		if t.CompletedAt != nil {
+			checkbox = "[✓]"
+		}
+
+		tag := "—"
+		if t.Tag != nil {
+			tag = t.Tag.Tag
+		}
+
+		items[i] = item{
+			Checkbox:       checkbox,
+			Tag:            tag,
+			DisplayedTitle: t.GetDisplayTitle(i == 0),
+		}
+	}
+
+	l := list.New(items, itemDelegate{}, 0, listHeight)
+
+	l.Styles.PaginationStyle = paginationStyle
+	l.Styles.HelpStyle = helpStyle
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false)
+	l.SetShowPagination(false)
+
+	return Model{
+		list:        l,
+		todos:       *todos,
+		db:          db,
+		totalPages:  totalPages,
+		currentPage: 0,
+	}, nil
+}
+
+func (m *Model) refreshTodos() error {
+	offset := m.currentPage * constants.DefaultLimit
+	todos, err := read(m.db, constants.DefaultLimit, offset, false)
+	if err != nil {
+		return err
+	}
+
+	m.todos = *todos
+
+	items := make([]list.Item, len(*todos))
+	for i, t := range *todos {
+		checkbox := "[ ]"
+		if t.CompletedAt != nil {
+			checkbox = "[✓]"
+		}
+
+		tag := "—"
+		if t.Tag != nil {
+			tag = t.Tag.Tag
+		}
+
+		items[i] = item{
+			Checkbox:       checkbox,
+			Tag:            tag,
+			DisplayedTitle: t.GetDisplayTitle(i == 0),
+		}
+	}
+
+	m.list.SetItems(items)
+	m.list.Select(0)
+	return nil
 }
 
 func (m Model) Init() tea.Cmd {
@@ -80,18 +175,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 
-		case "q", "ctrl+c", "esc":
-			m.quitting = true
-			return m, tea.Quit
-
 		case " ":
 			selectedIndex := m.list.Index()
-			if selectedIndex < 0 || selectedIndex >= len(*m.todos) {
-				// nothing selected; let list handle it
+			if selectedIndex < 0 || selectedIndex >= len(m.todos) {
 				break
 			}
 
-			todo := &(*m.todos)[selectedIndex]
+			todo := &m.todos[selectedIndex]
 
 			if todo.CompletedAt == nil {
 				now := time.Now()
@@ -102,12 +192,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			cb := "[ ]"
 			if todo.CompletedAt != nil {
-				cb = "[X]"
+				cb = "[✓]"
 			}
 
-			tag := todo.GetTag()
-			if tag == "" {
-				tag = "—"
+			tag := "—"
+			if todo.Tag != nil {
+				tag = todo.Tag.Tag
 			}
 
 			m.list.SetItem(selectedIndex, item{
@@ -118,21 +208,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 
-		case "enter":
+		case "enter", "q", "ctrl+c", "esc":
 			idx := m.list.Index()
-			if idx < 0 || idx >= len(*m.todos) {
-				break
-			}
-
-			todo := &(*m.todos)[idx]
-			if m.db != nil {
-				_ = m.db.Save(todo).Error
+			if idx >= 0 && idx < len(m.todos) {
+				todo := &m.todos[idx]
+				if m.db != nil {
+					_ = m.db.Save(todo).Error
+				}
 			}
 
 			return m, tea.Quit
-		}
 
-		// unhandled keys fall through to list.Update
+		case "left", "h":
+			if m.totalPages > 1 && m.currentPage > 0 {
+				m.currentPage--
+				_ = m.refreshTodos()
+			}
+			return m, nil
+
+		case "right", "l":
+			if m.totalPages > 1 && m.currentPage < m.totalPages-1 {
+				m.currentPage++
+				_ = m.refreshTodos()
+			}
+			return m, nil
+		}
 	}
 
 	var cmd tea.Cmd
@@ -140,44 +240,90 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func renderPagination(currentPage, totalPages int) string {
+	current := currentPage + 1
+
+	if totalPages <= 1 {
+		return ""
+	}
+
+	var pages []string
+
+	makePage := func(n int) string {
+		if n == current {
+			return pageActiveStyle.Render(fmt.Sprintf("[%d]", n))
+		}
+		return pageInactiveStyle.Render(fmt.Sprintf("%d", n))
+	}
+
+	if current > 3 {
+		pages = append(pages, makePage(1))
+		pages = append(pages, "...")
+	}
+
+	start := max(1, current-1)
+	end := min(totalPages, current+1)
+
+	for i := start; i <= end; i++ {
+		pages = append(pages, makePage(i))
+	}
+
+	if current < totalPages-2 {
+		pages = append(pages, "...")
+		pages = append(pages, makePage(totalPages))
+	}
+
+	return strings.Join(pages, " ")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return quitTextStyle.Render("Exiting program.")
 	}
-	return "\n" + m.list.View()
-}
 
-func NewModel(todos *[]models.Todo, db *gorm.DB) Model {
-	items := make([]list.Item, len(*todos))
+	leftRaw, rightRaw := "◀", "▶"
 
-	for i, t := range *todos {
-		checkbox := "[ ]"
-		if t.CompletedAt != nil {
-			checkbox = "[X]"
+	var leftArrow, rightArrow string
+
+	if m.totalPages <= 1 {
+		leftArrow = arrowDisabledStyle.Render(leftRaw)
+		rightArrow = arrowDisabledStyle.Render(rightRaw)
+	} else {
+		if m.currentPage == 0 {
+			leftArrow = arrowDisabledStyle.Render(leftRaw)
+		} else {
+			leftArrow = arrowEnabledStyle.Render(leftRaw)
 		}
 
-		tag := "—"
-		if t.Tag != nil {
-			tag = t.Tag.Tag
-		}
-
-		items[i] = item{
-			Checkbox:       checkbox,
-			Tag:            tag,
-			DisplayedTitle: t.GetDisplayTitle(i == 0), // DB order DESC
+		if m.currentPage >= m.totalPages-1 {
+			rightArrow = arrowDisabledStyle.Render(rightRaw)
+		} else {
+			rightArrow = arrowEnabledStyle.Render(rightRaw)
 		}
 	}
 
-	l := list.New(items, itemDelegate{}, 0, listHeight)
+	m.list.Title = "✏️ My Todos"
 
-	// Title + short description under it
-	l.Title = "Your Todos\nSpace: check/uncheck · Esc: exit"
+	pagination := fmt.Sprintf(
+		"\n\n  %s  %s  %s",
+		leftArrow,
+		renderPagination(m.currentPage, m.totalPages),
+		rightArrow,
+	)
 
-	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowHelp(false)
-
-	return Model{list: l, todos: todos, db: db}
+	return "\n" + m.list.View() + pagination
 }
