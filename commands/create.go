@@ -9,6 +9,12 @@ import (
 func createTag(db *gorm.DB, tag string) (*models.TodoTag, error) {
 	t := models.TodoTag{Tag: tag}
 
+	// If tag found, retunr it
+	if err := db.Select(&t).Where("tag = ?", tag).Error; err != nil {
+		return &t, nil
+	}
+
+	// Create new Tag if not found
 	err := db.Save(&t).Error
 	if err != nil {
 		return nil, err
